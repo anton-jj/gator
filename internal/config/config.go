@@ -25,15 +25,16 @@ func getConfigFilePath() (string, error) {
 
 func (c *Config) SetUsername(username string) {
 	c.Current_Username = username
+	c.write()
 }
 
-func (c *Config) Write(cfg Config) error {
+func (c *Config) write() error {
 
 	filepath, err := getConfigFilePath()
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(cfg)
+	data, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
