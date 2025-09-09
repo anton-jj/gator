@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/google/uuid"
+	_ "github.com/lib/pq"
 	"gituhub.com/anton-jj/gator/internal/config"
+	"gituhub.com/anton-jj/gator/internal/database"
 )
 
 type commands struct {
@@ -27,6 +33,7 @@ func (c *commands) register(name string, f func(*state, command) error) {
 }
 
 type state struct {
+	db  *database.Queries
 	Cfg *config.Config
 }
 
@@ -42,10 +49,18 @@ func main() {
 		return
 	}
 	appState := state{Cfg: &cfg}
-	cliCommands := commands{}
-	cliCommands.register("login", handlerlogin)
+	db, err := sql.Open("postgres", appState.Cfg.DB_URL)
+	if err != nil {
+		fmt.Println("failed to create/connect to db")
+		os.Exit(1)
+	}
+	dbQueries := database.New(db)
+	appState.db = dbQueries
 
-	fmt.Println(os.Args[2:])
+	cliCommands := commands{}
+	cliCommands.register("login", handlerLogin)
+	cliCommands.register("register", handlerRegister)
+
 	if len(os.Args) < 2 {
 		fmt.Println("error give more arguments")
 		os.Exit(1)
@@ -62,15 +77,51 @@ func main() {
 
 }
 
-func handlerlogin(s *state, cmd command) error {
+func checkArgLen(cmd command) bool {
 	if len(cmd.Args) == 0 {
-		errors.New("hello send some arguments")
+		return false
 	}
 	if len(cmd.Args) > 1 {
-		errors.New("pls my friend one argument is enough")
+		return false
 	}
-	s.Cfg.SetUsername(cmd.Args[0])
-	fmt.Printf("the username has ben set to %s\n", cmd.Args[0])
+	return true
+}
+
+func handlerRegister(s *state, cmd command) error {
+
+	if !checkArgLen(cmd) {
+		errors.New("pls send right arguments")
+	}
+
+	fmt.Println(cmd.Args[0])
+	userParmas := database.CreateUserParams{
+		ID:        uuid.New(),
+		Name:      cmd.Args[0],
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	s.db.CreateUser(context.Background(), userParmas)
+	fmt.Println("user was created")
+	fmt.Println("user name: ", userParmas.Name)
+	fmt.Println("user uuid: ", userParmas.ID)
+	fmt.Println("user created at: ", userParmas.CreatedAt)
+	fmt.Println("user UpdatedAt: ", userParmas.UpdatedAt)
+
+	return nil
+}
+func handlerLogin(s *state, cmd command) error {
+
+	if !checkArgLen(cmd) {
+		fmt.Printf("pls send right arguments\n")
+	}
+
+	user, err := s.db.GetUser(context.Background(), cmd.Args[0])
+	if err != nil {
+		fmt.Printf("user not found pls try again\n")
+		return err
+	}
+	s.Cfg.SetUsername(user.Name)
+	fmt.Printf("%s has logged in\n", user.Name)
 	return nil
 
 }
