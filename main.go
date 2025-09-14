@@ -3,15 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"os"
-	"time"
-
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"gituhub.com/anton-jj/gator/internal/api"
 	"gituhub.com/anton-jj/gator/internal/config"
 	"gituhub.com/anton-jj/gator/internal/database"
+	"os"
+	"time"
 )
 
 type commands struct {
@@ -51,7 +50,7 @@ func main() {
 	appState := state{Cfg: &cfg}
 	db, err := sql.Open("postgres", appState.Cfg.DB_URL)
 	if err != nil {
-		fmt.Println("failed to create/connect to db")
+		fmt.Errorf("failed to create/connect to db")
 		os.Exit(1)
 	}
 	dbQueries := database.New(db)
@@ -60,6 +59,11 @@ func main() {
 	cliCommands := commands{}
 	cliCommands.register("login", handlerLogin)
 	cliCommands.register("register", handlerRegister)
+	cliCommands.register("reset", handlerReset)
+	cliCommands.register("users", handlerUsers)
+	cliCommands.register("agg", handleAgg)
+	cliCommands.register("addfeed", handleAddFeed)
+	cliCommands.register("feeds", handleFeeds)
 
 	if len(os.Args) < 2 {
 		fmt.Println("error give more arguments")
@@ -67,7 +71,10 @@ func main() {
 	}
 	name := os.Args[1]
 	args := []string{}
-	if len(os.Args) > 2 {
+	if len(os.Args) == 2 {
+		args = os.Args[1:]
+	} else {
+
 		args = os.Args[2:]
 	}
 	cmd := command{Name: name, Args: args}
@@ -81,26 +88,29 @@ func checkArgLen(cmd command) bool {
 	if len(cmd.Args) == 0 {
 		return false
 	}
-	if len(cmd.Args) > 1 {
-		return false
-	}
 	return true
 }
 
 func handlerRegister(s *state, cmd command) error {
 
 	if !checkArgLen(cmd) {
-		errors.New("pls send right arguments")
+		return fmt.Errorf("pls send right arguments")
 	}
 
-	fmt.Println(cmd.Args[0])
+	_, err := s.db.GetUser(context.Background(), cmd.Args[0])
+	if err == nil {
+		return fmt.Errorf("User %q already exists – please pick another name.\n", cmd.Args[0])
+	}
+
 	userParmas := database.CreateUserParams{
 		ID:        uuid.New(),
 		Name:      cmd.Args[0],
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+
 	s.db.CreateUser(context.Background(), userParmas)
+	s.Cfg.SetUsername(cmd.Args[0])
 	fmt.Println("user was created")
 	fmt.Println("user name: ", userParmas.Name)
 	fmt.Println("user uuid: ", userParmas.ID)
@@ -112,7 +122,7 @@ func handlerRegister(s *state, cmd command) error {
 func handlerLogin(s *state, cmd command) error {
 
 	if !checkArgLen(cmd) {
-		fmt.Printf("pls send right arguments\n")
+		return fmt.Errorf("pls send right arguments\n")
 	}
 
 	user, err := s.db.GetUser(context.Background(), cmd.Args[0])
@@ -123,5 +133,110 @@ func handlerLogin(s *state, cmd command) error {
 	s.Cfg.SetUsername(user.Name)
 	fmt.Printf("%s has logged in\n", user.Name)
 	return nil
+
+}
+func handlerReset(s *state, cmd command) error {
+	if !checkArgLen(cmd) {
+		return fmt.Errorf("pls send right arguments\n")
+	}
+	err := s.db.ResetDatabase(context.Background())
+	if err != nil {
+		fmt.Printf(err.Error())
+		return err
+	}
+	fmt.Printf("The database was reset")
+	return nil
+}
+
+func handlerUsers(s *state, cmd command) error {
+	if !checkArgLen(cmd) {
+		return fmt.Errorf("pls send right arguments\n")
+	}
+	users, err := s.db.GetUsers(context.Background())
+	if err != nil {
+		return err
+	}
+
+	for _, user := range users {
+		if user.Name == s.Cfg.Current_Username {
+			fmt.Printf("%s (current)\n", user.Name)
+		} else {
+			fmt.Printf("%s\n", user.Name)
+		}
+	}
+	return nil
+}
+
+func handleAgg(s *state, cmd command) error {
+	BASE_URL := "https://www.wagslane.dev/index.xml"
+
+	agg, err := api.FetchFeed(context.Background(), BASE_URL)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(agg)
+	return nil
+}
+
+func handleAddFeed(s *state, cmd command) error {
+	if len(cmd.Args) < 2 {
+		return fmt.Errorf("to few args")
+	}
+	current, err := s.db.GetUser(context.Background(), s.Cfg.Current_Username)
+	if err != nil {
+		return err
+	}
+	name := cmd.Args[0]
+	url := cmd.Args[1]
+
+	addfeedParam := database.CreateFeedsParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      name,
+		Url:       url,
+		UserID:    current.ID,
+	}
+
+	s.db.CreateFeeds(context.Background(), addfeedParam)
+	return nil
+}
+
+func handleFeeds(s *state, cmd command) error {
+
+	if !checkArgLen(cmd) {
+		return fmt.Errorf("pls send right arguments\n")
+	}
+	feeds, err := s.db.GetFeeds(context.Background())
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("feeds: \n")
+	for _, feed := range feeds {
+		fmt.Printf(" - name: %s\n - url: %s\n", feed.Name, feed.Url)
+		user, err := s.db.GetUserById(context.Background(), feed.UserID)
+		if err != nil {
+			return err
+		}
+		fmt.Printf(" - created by: %s\n", user.Name)
+	}
+
+	return nil
+}
+
+func handlerFollow(s *state, cmd command) error {
+
+	if !checkArgLen(cmd) {
+		return fmt.Errorf("pls send right arguments\n")
+	}
+
+	feed, err := s.db.FindFeedByUrl(context.Background(), cmd.Args[1])
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%s ")
 
 }
