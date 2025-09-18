@@ -13,3 +13,5 @@ RETURNING *;
 	SELECT * FROM users WHERE id = $1;
 -- name: GetFeeds :many
 	SELECT * FROM feeds;
+-- name: MarkFetchedFeed :exec
+    INSERT INTO feeds (updated_at, last_fetched_at) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM feeds WHERE feeds.id = $3);

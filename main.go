@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"gituhub.com/anton-jj/gator/internal/api"
 	"gituhub.com/anton-jj/gator/internal/config"
 	"gituhub.com/anton-jj/gator/internal/database"
-	"os"
-	"time"
 )
 
 type commands struct {
@@ -42,7 +43,6 @@ type command struct {
 }
 
 func main() {
-	// gatorConf, err := config.Read()
 	cfg, err := config.Read()
 	if err != nil {
 		return
@@ -50,7 +50,7 @@ func main() {
 	appState := state{Cfg: &cfg}
 	db, err := sql.Open("postgres", appState.Cfg.DB_URL)
 	if err != nil {
-		fmt.Errorf("failed to create/connect to db")
+		fmt.Errorf(err.Error())
 		os.Exit(1)
 	}
 	dbQueries := database.New(db)
@@ -62,8 +62,11 @@ func main() {
 	cliCommands.register("reset", handlerReset)
 	cliCommands.register("users", handlerUsers)
 	cliCommands.register("agg", handleAgg)
-	cliCommands.register("addfeed", handleAddFeed)
+	cliCommands.register("addfeed", middlewareLoggedIn(handleAddFeed))
 	cliCommands.register("feeds", handleFeeds)
+	cliCommands.register("follow", middlewareLoggedIn(handlerFollow))
+	cliCommands.register("following", middlewareLoggedIn(handlerFollowing))
+	cliCommands.register("unfollow", middlewareLoggedIn(handleUnfollow))
 
 	if len(os.Args) < 2 {
 		fmt.Println("error give more arguments")
@@ -84,22 +87,31 @@ func main() {
 
 }
 
-func checkArgLen(cmd command) bool {
-	if len(cmd.Args) == 0 {
-		return false
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		user, err := s.db.GetUser(context.Background(), s.Cfg.Current_Username)
+		if err != nil {
+			return err
+		}
+		return handler(s, cmd, user)
 	}
-	return true
+}
+func checkArgLen(cmd command) error {
+	if len(cmd.Args) == 0 {
+		return fmt.Errorf("pls send in an argument")
+	}
+	return nil
 }
 
 func handlerRegister(s *state, cmd command) error {
 
-	if !checkArgLen(cmd) {
-		return fmt.Errorf("pls send right arguments")
+	if err := checkArgLen(cmd); err != nil {
+		return err
 	}
 
 	_, err := s.db.GetUser(context.Background(), cmd.Args[0])
 	if err == nil {
-		return fmt.Errorf("User %q already exists – please pick another name.\n", cmd.Args[0])
+		return err
 	}
 
 	userParmas := database.CreateUserParams{
@@ -121,8 +133,8 @@ func handlerRegister(s *state, cmd command) error {
 }
 func handlerLogin(s *state, cmd command) error {
 
-	if !checkArgLen(cmd) {
-		return fmt.Errorf("pls send right arguments\n")
+	if err := checkArgLen(cmd); err != nil {
+		return err
 	}
 
 	user, err := s.db.GetUser(context.Background(), cmd.Args[0])
@@ -136,8 +148,8 @@ func handlerLogin(s *state, cmd command) error {
 
 }
 func handlerReset(s *state, cmd command) error {
-	if !checkArgLen(cmd) {
-		return fmt.Errorf("pls send right arguments\n")
+	if err := checkArgLen(cmd); err != nil {
+		return err
 	}
 	err := s.db.ResetDatabase(context.Background())
 	if err != nil {
@@ -149,8 +161,8 @@ func handlerReset(s *state, cmd command) error {
 }
 
 func handlerUsers(s *state, cmd command) error {
-	if !checkArgLen(cmd) {
-		return fmt.Errorf("pls send right arguments\n")
+	if err := checkArgLen(cmd); err != nil {
+		return err
 	}
 	users, err := s.db.GetUsers(context.Background())
 	if err != nil {
@@ -179,7 +191,7 @@ func handleAgg(s *state, cmd command) error {
 	return nil
 }
 
-func handleAddFeed(s *state, cmd command) error {
+func handleAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.Args) < 2 {
 		return fmt.Errorf("to few args")
 	}
@@ -199,14 +211,29 @@ func handleAddFeed(s *state, cmd command) error {
 		UserID:    current.ID,
 	}
 
-	s.db.CreateFeeds(context.Background(), addfeedParam)
+	feed, err := s.db.CreateFeeds(context.Background(), addfeedParam)
+	if err != nil {
+		return err
+	}
+	newFeedFollowParams := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		UserID:    current.ID,
+		FeedID:    feed.ID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	res, err := s.db.CreateFeedFollow(context.Background(), newFeedFollowParams)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("feed: %s is now followed by %s\n", res.FeedName, res.UserName)
 	return nil
 }
 
 func handleFeeds(s *state, cmd command) error {
 
-	if !checkArgLen(cmd) {
-		return fmt.Errorf("pls send right arguments\n")
+	if err := checkArgLen(cmd); err != nil {
+		return err
 	}
 	feeds, err := s.db.GetFeeds(context.Background())
 	if err != nil {
@@ -226,17 +253,63 @@ func handleFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollow(s *state, cmd command) error {
+func handlerFollow(s *state, cmd command, user database.User) error {
+	if err := checkArgLen(cmd); err != nil {
+		return err
+	}
+	feed, err := s.db.FindFeedByUrl(context.Background(), cmd.Args[0])
+	if err != nil {
+		fmt.Printf("failed at find feed by url?")
+		return err
+	}
+	newFeedFollowParams := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	res, err := s.db.CreateFeedFollow(context.Background(), newFeedFollowParams)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("feed: %s is now followed by %s\n", res.FeedName, res.UserName)
+	return nil
+}
 
-	if !checkArgLen(cmd) {
-		return fmt.Errorf("pls send right arguments\n")
+func handlerFollowing(s *state, cmd command, user database.User) error {
+	if err := checkArgLen(cmd); err != nil {
+		return err
+	}
+	feeds, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
+	if err != nil {
+		fmt.Println(err.Error())
+
+		return err
 	}
 
-	feed, err := s.db.FindFeedByUrl(context.Background(), cmd.Args[1])
+	fmt.Printf("%s is following: \n", user.Name)
+	for _, feed := range feeds {
+		fmt.Printf("-%s\n", feed.FeedName)
+	}
+	return nil
+}
+
+func handleUnfollow(s *state, cmd command, user database.User) error {
+	if err := checkArgLen(cmd); err != nil {
+		return err
+	}
+	fmt.Printf(cmd.Args[0])
+	feed, err := s.db.FindFeedByUrl(context.Background(), cmd.Args[0])
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("%s ")
+	s.db.RemoveFeedFollowsRecord(context.Background(), database.RemoveFeedFollowsRecordParams{
+		UserID: user.ID,
+		FeedID: feed.ID,
+	})
+	fmt.Printf("%s stopped following %s\n", user.Name, feed.Name)
+	return nil
 
 }

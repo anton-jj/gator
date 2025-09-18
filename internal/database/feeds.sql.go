@@ -7,6 +7,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,7 +23,7 @@ VALUES (
 	$5,
 	$6
 )
-RETURNING id, created_at, updated_at, name, url, user_id
+RETURNING id, created_at, updated_at, name, url, user_id, last_fetched_at
 `
 
 type CreateFeedsParams struct {
@@ -51,6 +52,7 @@ func (q *Queries) CreateFeeds(ctx context.Context, arg CreateFeedsParams) (Feed,
 		&i.Name,
 		&i.Url,
 		&i.UserID,
+		&i.LastFetchedAt,
 	)
 	return i, err
 }
@@ -72,7 +74,7 @@ func (q *Queries) GetFeed(ctx context.Context, id uuid.UUID) (User, error) {
 }
 
 const getFeeds = `-- name: GetFeeds :many
-	SELECT id, created_at, updated_at, name, url, user_id FROM feeds
+	SELECT id, created_at, updated_at, name, url, user_id, last_fetched_at FROM feeds
 `
 
 func (q *Queries) GetFeeds(ctx context.Context) ([]Feed, error) {
@@ -91,6 +93,7 @@ func (q *Queries) GetFeeds(ctx context.Context) ([]Feed, error) {
 			&i.Name,
 			&i.Url,
 			&i.UserID,
+			&i.LastFetchedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -103,4 +106,19 @@ func (q *Queries) GetFeeds(ctx context.Context) ([]Feed, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const markFetchedFeed = `-- name: MarkFetchedFeed :exec
+    INSERT INTO feeds (updated_at, last_fetched_at) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM feeds WHERE feeds.id = $3)
+`
+
+type MarkFetchedFeedParams struct {
+	UpdatedAt     time.Time
+	LastFetchedAt sql.NullTime
+	ID            uuid.UUID
+}
+
+func (q *Queries) MarkFetchedFeed(ctx context.Context, arg MarkFetchedFeedParams) error {
+	_, err := q.db.ExecContext(ctx, markFetchedFeed, arg.UpdatedAt, arg.LastFetchedAt, arg.ID)
+	return err
 }

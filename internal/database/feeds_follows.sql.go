@@ -18,10 +18,10 @@ WITH inserted_feed_follow AS (
 	VALUES($1, $2, $3, $4, $5)
 	RETURNING id, created_at, updated_at, user_id, feed_id
 )
-SELECT 
-	iif.id, iif.created_at, iif.updated_at, iif.user_id, iif.feed_id, 
+SELECT
+	iif.id, iif.created_at, iif.updated_at, iif.user_id, iif.feed_id,
 	f.name AS feed_name,
-	u.name AS user_name 
+	u.name AS user_name
 	FROM inserted_feed_follow AS iif
 	JOIN users AS u ON u.id = iif.user_id
 	JOIN feeds AS f ON f.id = iif.feed_id
@@ -81,4 +81,67 @@ func (q *Queries) FindFeedByUrl(ctx context.Context, url string) (FindFeedByUrlR
 	var i FindFeedByUrlRow
 	err := row.Scan(&i.ID, &i.Name, &i.Url)
 	return i, err
+}
+
+const getFeedFollowsForUser = `-- name: GetFeedFollowsForUser :many
+SELECT ff.id, ff.user_id, ff.feed_id, ff.created_at, ff.updated_at, f.name AS feed_name, u.name AS user_name FROM feed_follows AS ff
+INNER JOIN feeds AS f on ff.feed_id = f.id
+INNER JOIN users AS u on ff.user_id = u.id
+WHERE u.id = $1
+`
+
+type GetFeedFollowsForUserRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	FeedID    uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	FeedName  string
+	UserName  string
+}
+
+func (q *Queries) GetFeedFollowsForUser(ctx context.Context, id uuid.UUID) ([]GetFeedFollowsForUserRow, error) {
+	rows, err := q.db.QueryContext(ctx, getFeedFollowsForUser, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetFeedFollowsForUserRow
+	for rows.Next() {
+		var i GetFeedFollowsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.FeedID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FeedName,
+			&i.UserName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const removeFeedFollowsRecord = `-- name: RemoveFeedFollowsRecord :exec
+DELETE FROM feed_follows 
+WHERE user_id = $1 AND feed_id = $2
+`
+
+type RemoveFeedFollowsRecordParams struct {
+	UserID uuid.UUID
+	FeedID uuid.UUID
+}
+
+func (q *Queries) RemoveFeedFollowsRecord(ctx context.Context, arg RemoveFeedFollowsRecordParams) error {
+	_, err := q.db.ExecContext(ctx, removeFeedFollowsRecord, arg.UserID, arg.FeedID)
+	return err
 }
