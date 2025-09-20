@@ -327,9 +327,24 @@ func scrapeFeeds(s *state) error {
 	if err != nil {
 		return err
 	}
-
+	id := uuid.NullUUID{
+		UUID:  nextFeed.ID,
+		Valid: true,
+	}
 	for _, f := range res.Channel.Item {
-		fmt.Printf("%s\n", f.Title)
+		params := database.CreatePostParams{
+			ID:        uuid.New(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Title:     f.Title,
+			Url:       f.Link,
+			FeedID:    id,
+		}
+		newPost, err := s.db.CreatePost(context.Background(), params)
+		if err != nil {
+			return err
+		}
+		fmt.Println(newPost)
 	}
 
 	return nil
