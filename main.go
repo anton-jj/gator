@@ -180,14 +180,17 @@ func handlerUsers(s *state, cmd command) error {
 }
 
 func handleAgg(s *state, cmd command) error {
-	BASE_URL := "https://www.wagslane.dev/index.xml"
-
-	agg, err := api.FetchFeed(context.Background(), BASE_URL)
+	time_between_req, err := time.ParseDuration(cmd.Args[0])
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(agg)
+	ticker := time.NewTicker(time_between_req)
+	fmt.Printf("Collecting feeds every %v\n", time_between_req)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
+	}
+
 	return nil
 }
 
@@ -310,6 +313,25 @@ func handleUnfollow(s *state, cmd command, user database.User) error {
 		FeedID: feed.ID,
 	})
 	fmt.Printf("%s stopped following %s\n", user.Name, feed.Name)
+	return nil
+
+}
+
+func scrapeFeeds(s *state) error {
+	nextFeed, err := s.db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		return err
+	}
+
+	res, err := api.FetchFeed(context.Background(), nextFeed.Url)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range res.Channel.Item {
+		fmt.Printf("%s\n", f.Title)
+	}
+
 	return nil
 
 }
