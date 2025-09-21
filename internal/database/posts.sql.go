@@ -7,31 +7,34 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 const createPost = `-- name: CreatePost :one
-INSERT INTO posts(id, created_at, updated_at, title, url, feed_id)
+INSERT INTO posts(id, created_at, updated_at, title, description,  url, feed_id)
 VALUES (
     $1,
     $2,
     $3,
     $4,
 	$5,
-	$6
+	$6,
+	$7
 )
 RETURNING id, created_at, updated_at, title, url, description, published_at, feed_id
 `
 
 type CreatePostParams struct {
-	ID        uuid.UUID
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Title     string
-	Url       string
-	FeedID    uuid.NullUUID
+	ID          uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Title       string
+	Description sql.NullString
+	Url         string
+	FeedID      uuid.NullUUID
 }
 
 func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, error) {
@@ -40,6 +43,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Title,
+		arg.Description,
 		arg.Url,
 		arg.FeedID,
 	)

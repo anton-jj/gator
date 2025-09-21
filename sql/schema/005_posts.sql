@@ -6,7 +6,7 @@ CREATE TABLE posts(
 	title TEXT NOT NULL,
 	url TEXT UNIQUE NOT NULL,
 	description TEXT,
-	published_at TEXT,
+	published_at DATE,
 	feed_id UUID
 );
 -- +goose Down

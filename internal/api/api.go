@@ -47,8 +47,8 @@ func FetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	if err := xml.Unmarshal(body, &rssFeed); err != nil {
 		return nil, err
 	}
-	rssFeed.Channel.Title = html.UnescapeString(rssFeed.Channel.Title)
-	rssFeed.Channel.Description = html.UnescapeString(rssFeed.Channel.Description)
+	// rssFeed.Channel.Title = html.UnescapeString(rssFeed.Channel.Title)
+	// rssFeed.Channel.Description = html.UnescapeString(rssFeed.Channel.Description)
 
 	for i, item := range rssFeed.Channel.Item {
 		item.Title = html.UnescapeString(item.Title)

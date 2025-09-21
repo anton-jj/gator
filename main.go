@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,6 +68,7 @@ func main() {
 	cliCommands.register("follow", middlewareLoggedIn(handlerFollow))
 	cliCommands.register("following", middlewareLoggedIn(handlerFollowing))
 	cliCommands.register("unfollow", middlewareLoggedIn(handleUnfollow))
+	cliCommands.register("browse", middlewareLoggedIn(handleBrowse))
 
 	if len(os.Args) < 2 {
 		fmt.Println("error give more arguments")
@@ -332,21 +334,60 @@ func scrapeFeeds(s *state) error {
 		Valid: true,
 	}
 	for _, f := range res.Channel.Item {
-		params := database.CreatePostParams{
-			ID:        uuid.New(),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-			Title:     f.Title,
-			Url:       f.Link,
-			FeedID:    id,
+		desc := sql.NullString{
+			String: f.Description,
+			Valid:  true,
 		}
-		newPost, err := s.db.CreatePost(context.Background(), params)
+		fmt.Println(desc)
+		params := database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			Title:       f.Title,
+			Description: desc,
+			Url:         f.Link,
+			FeedID:      id,
+		}
+		_, err := s.db.CreatePost(context.Background(), params)
 		if err != nil {
 			return err
 		}
-		fmt.Println(newPost)
 	}
 
 	return nil
 
+}
+
+func handleBrowse(s *state, cmd command, user database.User) error {
+
+	feeds, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
+	if err != nil {
+		return err
+	}
+	limit, err := strconv.Atoi(cmd.Args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Println(limit)
+	if limit == 0 {
+		limit = 2
+	}
+	fmt.Println(limit)
+	for _, feed := range feeds {
+		params := database.GetPostsParams{
+			FeedID: uuid.NullUUID{
+				UUID:  feed.ID,
+				Valid: true,
+			},
+			Limit: int32(limit),
+		}
+		fmt.Println(params)
+		posts, err := s.db.GetPosts(context.Background(), params)
+		if err != nil {
+			return nil
+		}
+		fmt.Println(posts)
+	}
+
+	return nil
 }
