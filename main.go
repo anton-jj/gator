@@ -333,29 +333,37 @@ func scrapeFeeds(s *state) error {
 		UUID:  nextFeed.ID,
 		Valid: true,
 	}
+	fmt.Println(id)
 	for _, f := range res.Channel.Item {
 		desc := sql.NullString{
 			String: f.Description,
 			Valid:  true,
 		}
 		fmt.Println(desc)
+		date, err := time.Parse("YYYY-MM-DD", f.Description)
+		if err != nil {
+			return err
+		}
 		params := database.CreatePostParams{
 			ID:          uuid.New(),
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 			Title:       f.Title,
 			Description: desc,
-			Url:         f.Link,
-			FeedID:      id,
+			PublishedAt: sql.NullTime{
+				Time:  date,
+				Valid: true,
+			},
+			Url:    f.Link,
+			FeedID: id,
 		}
-		_, err := s.db.CreatePost(context.Background(), params)
+		post, err := s.db.CreatePost(context.Background(), params)
 		if err != nil {
 			return err
 		}
+		fmt.Println(post)
 	}
-
 	return nil
-
 }
 
 func handleBrowse(s *state, cmd command, user database.User) error {
@@ -369,11 +377,14 @@ func handleBrowse(s *state, cmd command, user database.User) error {
 		return err
 	}
 	fmt.Println(limit)
+
 	if limit == 0 {
 		limit = 2
 	}
+
 	fmt.Println(limit)
 	for _, feed := range feeds {
+		fmt.Println(feed.ID)
 		params := database.GetPostsParams{
 			FeedID: uuid.NullUUID{
 				UUID:  feed.ID,

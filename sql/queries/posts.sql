@@ -1,5 +1,5 @@
 -- name: CreatePost :one
-INSERT INTO posts(id, created_at, updated_at, title, description,  url, feed_id)
+INSERT INTO posts(id, created_at, updated_at, title, description, published_at ,url, feed_id)
 VALUES (
     $1,
     $2,
@@ -7,9 +7,10 @@ VALUES (
     $4,
 	$5,
 	$6,
-	$7
+	$7,
+	$8
 )
 RETURNING *;
 -- name: GetPosts :many
 	SELECT * FROM posts WHERE feed_id = $1
-	ORDER BY  DESC LIMIT $2;
+	ORDER BY published_at DESC LIMIT $2;

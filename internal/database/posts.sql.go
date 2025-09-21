@@ -14,7 +14,7 @@ import (
 )
 
 const createPost = `-- name: CreatePost :one
-INSERT INTO posts(id, created_at, updated_at, title, description,  url, feed_id)
+INSERT INTO posts(id, created_at, updated_at, title, description, published_at ,url, feed_id)
 VALUES (
     $1,
     $2,
@@ -22,7 +22,8 @@ VALUES (
     $4,
 	$5,
 	$6,
-	$7
+	$7,
+	$8
 )
 RETURNING id, created_at, updated_at, title, url, description, published_at, feed_id
 `
@@ -33,6 +34,7 @@ type CreatePostParams struct {
 	UpdatedAt   time.Time
 	Title       string
 	Description sql.NullString
+	PublishedAt sql.NullTime
 	Url         string
 	FeedID      uuid.NullUUID
 }
@@ -44,6 +46,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 		arg.UpdatedAt,
 		arg.Title,
 		arg.Description,
+		arg.PublishedAt,
 		arg.Url,
 		arg.FeedID,
 	)
@@ -63,7 +66,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 
 const getPosts = `-- name: GetPosts :many
 	SELECT id, created_at, updated_at, title, url, description, published_at, feed_id FROM posts WHERE feed_id = $1
-	ORDER BY created_at ASC LIMIT $2
+	ORDER BY published_at DESC LIMIT $2
 `
 
 type GetPostsParams struct {
