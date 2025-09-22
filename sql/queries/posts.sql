@@ -9,7 +9,7 @@ VALUES (
 	$6,
 	$7,
 	$8
-)
+) ON CONFLICT (url) DO NOTHING
 RETURNING *;
 -- name: GetPosts :many
 	SELECT * FROM posts WHERE feed_id = $1

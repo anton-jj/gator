@@ -14,7 +14,9 @@ RETURNING *;
 -- name: GetFeeds :many
 	SELECT * FROM feeds;
 -- name: MarkFetchedFeed :exec
-    INSERT INTO feeds (updated_at, last_fetched_at) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM feeds WHERE feeds.id = $3);
+	UPDATE feeds SET updated_at = $1, 
+		last_fetched_at = $2
+		WHERE id = $3;
 -- name: GetNextFeedToFetch :one
 SELECT *
     FROM feeds 

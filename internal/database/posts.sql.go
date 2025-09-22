@@ -24,7 +24,7 @@ VALUES (
 	$6,
 	$7,
 	$8
-)
+) ON CONFLICT (url) DO NOTHING
 RETURNING id, created_at, updated_at, title, url, description, published_at, feed_id
 `
 
@@ -36,7 +36,7 @@ type CreatePostParams struct {
 	Description sql.NullString
 	PublishedAt sql.NullTime
 	Url         string
-	FeedID      uuid.NullUUID
+	FeedID      uuid.UUID
 }
 
 func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, error) {
@@ -70,7 +70,7 @@ const getPosts = `-- name: GetPosts :many
 `
 
 type GetPostsParams struct {
-	FeedID uuid.NullUUID
+	FeedID uuid.UUID
 	Limit  int32
 }
 

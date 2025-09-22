@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -193,7 +194,6 @@ func handleAgg(s *state, cmd command) error {
 		scrapeFeeds(s)
 	}
 
-	return nil
 }
 
 func handleAddFeed(s *state, cmd command, user database.User) error {
@@ -301,16 +301,17 @@ func handlerFollowing(s *state, cmd command, user database.User) error {
 }
 
 func handleUnfollow(s *state, cmd command, user database.User) error {
+	ctx := context.Background()
 	if err := checkArgLen(cmd); err != nil {
 		return err
 	}
 	fmt.Printf(cmd.Args[0])
-	feed, err := s.db.FindFeedByUrl(context.Background(), cmd.Args[0])
+	feed, err := s.db.FindFeedByUrl(ctx, cmd.Args[0])
 	if err != nil {
 		return err
 	}
 
-	s.db.RemoveFeedFollowsRecord(context.Background(), database.RemoveFeedFollowsRecordParams{
+	s.db.RemoveFeedFollowsRecord(ctx, database.RemoveFeedFollowsRecordParams{
 		UserID: user.ID,
 		FeedID: feed.ID,
 	})
@@ -324,26 +325,25 @@ func scrapeFeeds(s *state) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("this is the nextfeed.id ", nextFeed.ID)
 
 	res, err := api.FetchFeed(context.Background(), nextFeed.Url)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to fetch feed from url: %w", err)
 	}
-	id := uuid.NullUUID{
-		UUID:  nextFeed.ID,
-		Valid: true,
-	}
-	fmt.Println(id)
+
 	for _, f := range res.Channel.Item {
 		desc := sql.NullString{
 			String: f.Description,
-			Valid:  true,
+			Valid:  f.Description != "",
 		}
 		fmt.Println(desc)
-		date, err := time.Parse("YYYY-MM-DD", f.Description)
+
+		date, err := time.Parse(time.RFC1123Z, f.PubDate)
 		if err != nil {
 			return err
 		}
+
 		params := database.CreatePostParams{
 			ID:          uuid.New(),
 			CreatedAt:   time.Now(),
@@ -355,14 +355,27 @@ func scrapeFeeds(s *state) error {
 				Valid: true,
 			},
 			Url:    f.Link,
-			FeedID: id,
+			FeedID: nextFeed.ID,
 		}
-		post, err := s.db.CreatePost(context.Background(), params)
-		if err != nil {
+		fmt.Println(params.Description)
+		_, err = s.db.CreatePost(context.Background(), params)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		} else if err != nil {
 			return err
 		}
-		fmt.Println(post)
+
 	}
+	now := time.Now()
+	markParms := database.MarkFetchedFeedParams{
+		UpdatedAt: now,
+		LastFetchedAt: sql.NullTime{
+			Time:  now,
+			Valid: true,
+		},
+		ID: nextFeed.ID,
+	}
+	err = s.db.MarkFetchedFeed(context.Background(), markParms)
 	return nil
 }
 
@@ -372,32 +385,38 @@ func handleBrowse(s *state, cmd command, user database.User) error {
 	if err != nil {
 		return err
 	}
-	limit, err := strconv.Atoi(cmd.Args[0])
-	if err != nil {
-		return err
-	}
-	fmt.Println(limit)
-
-	if limit == 0 {
-		limit = 2
-	}
-
-	fmt.Println(limit)
-	for _, feed := range feeds {
-		fmt.Println(feed.ID)
-		params := database.GetPostsParams{
-			FeedID: uuid.NullUUID{
-				UUID:  feed.ID,
-				Valid: true,
-			},
-			Limit: int32(limit),
+	limit := 2
+	if len(cmd.Args) > 0 {
+		if n, err := strconv.Atoi(cmd.Args[0]); err == nil && n > 0 {
+			limit = n
 		}
-		fmt.Println(params)
+	}
+	var all []database.Post
+	for _, feed := range feeds {
+
+		params := database.GetPostsParams{
+			FeedID: feed.FeedID,
+			Limit:  int32(limit),
+		}
 		posts, err := s.db.GetPosts(context.Background(), params)
 		if err != nil {
-			return nil
+			fmt.Println("failed getting the posts")
 		}
-		fmt.Println(posts)
+		fmt.Println(len(posts))
+		all = append(all, posts...)
+		if len(all) >= limit {
+			all = all[:limit]
+			break
+		}
+		fmt.Println(len(posts))
+	}
+
+	for _, post := range all {
+		post.Description.Valid = post.Description.String != ""
+		fmt.Printf("%s from %s\n", post.PublishedAt.Time.Format("Mon Jan 2"), post.Title)
+		fmt.Printf("    %v\n", post.Description.String)
+		fmt.Printf("Link: %s\n", post.Url)
+		fmt.Println("=====================================")
 	}
 
 	return nil
